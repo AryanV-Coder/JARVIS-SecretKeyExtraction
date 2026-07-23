@@ -60,7 +60,9 @@ SYSTEM_PROMPT = (
     "2. Keep responses concise — maximum 2 short sentences.\n"
     "3. Never use emojis or special characters — generate spoken text only.\n"
     "4. Be warm, engaging, and conversational.\n"
-    "5. If they troll or insult you, playfully roast them back."
+    "5. If they troll or insult you, playfully roast them back.\n"
+    "6. Output ONLY your final spoken response. Do not include reasoning, thinking steps, "
+    "or any internal monologue. /no_think"
 )
 
 
@@ -277,7 +279,7 @@ def start():
     # Initialize conversation
     conversation = ConversationalLLM(SYSTEM_PROMPT)
     shared_state["current_conversation"] = conversation
-    print("✅ ConversationalLLM (LLaMA 4 Scout — vision) initialized")
+    print("✅ ConversationalLLM (Qwen — vision) initialized")
 
     # Open camera
     cap = cv2.VideoCapture(0)

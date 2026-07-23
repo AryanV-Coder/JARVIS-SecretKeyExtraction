@@ -1,6 +1,6 @@
 import os
+import re
 import base64
-import sys
 from groq import Groq, RateLimitError, APIStatusError
 from dotenv import load_dotenv
 
@@ -18,15 +18,18 @@ def _encode_image(image_path: str) -> str:
 
 class ConversationalLLM:
     """
-    Stateful conversational LLM powered by Groq LLaMA 4 Scout (vision-capable).
+    Stateful conversational LLM powered by Groq Qwen 3.6 27B (vision-capable).
 
     Each call to send_message() optionally accepts an image_path.
     When provided, the frame is embedded as a base64 JPEG alongside the
     user's text so the model can see the person who is speaking.
 
+    Message format follows the official Groq vision docs exactly:
+      content = [{type: text}, {type: image_url}]  ← text always first
+
     Chat history is preserved across turns. Only the user turn that
     includes an image carries the image — subsequent text-only turns
-    are sent normally, keeping token costs low.
+    are sent as plain strings, keeping token costs low.
     """
 
     def __init__(self, system_prompt: str):
@@ -54,18 +57,20 @@ class ConversationalLLM:
         """
 
         # ── Build user content ──────────────────────────────────────────────
+        # Order follows official Groq vision docs: text block first, image_url second.
+        # https://console.groq.com/docs/vision
         if image_path and os.path.exists(image_path):
             b64 = _encode_image(image_path)
             user_content = [
                 {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{b64}"
-                    },
-                },
-                {
                     "type": "text",
                     "text": user_text,
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{b64}",
+                    },
                 },
             ]
             print(f"📸 Vision: sending frame → {image_path}")
@@ -83,14 +88,27 @@ class ConversationalLLM:
                 model=VISION_MODEL,
                 messages=self.chat_history,
                 temperature=0.7,
-                max_completion_tokens=1024,
+                max_completion_tokens=4096,  # Qwen reasoning uses tokens before the real answer
                 top_p=1,
                 stream=False,
                 stop=None,
             )
 
-            answer = response.choices[0].message.content
-            # Store assistant reply as plain text in history (no image in assistant turn)
+            raw = response.choices[0].message.content or ""
+
+            # ── Strip Qwen reasoning blocks ──────────────────────────────────
+            # Qwen 3.6 is a reasoning model: it wraps its chain-of-thought in
+            # <think>...</think> before the actual answer. We must strip this
+            # before logging or passing to TTS, otherwise TTS gets thousands
+            # of tokens of internal monologue and returns 0 audio chunks.
+            answer = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+
+            if not answer:
+                # Fallback: if stripping removed everything, something is wrong
+                print("⚠️  LLM returned only a think block with no final answer.")
+                answer = "Sorry, I got a bit lost in thought there. Could you repeat that?"
+
+            # Store clean answer in history (no think block, no image in assistant turn)
             self.chat_history.append({"role": "assistant", "content": answer})
             return answer
 

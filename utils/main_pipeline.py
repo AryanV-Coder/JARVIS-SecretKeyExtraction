@@ -12,17 +12,25 @@ load_dotenv()
 def main_pipeline(audio_path, shared_state):
     """
     Process recorded audio through the full voice pipeline:
-    STT (Sarvam saaras:v3) → LLM (Groq LLaMA) → TTS (Sarvam bulbul:v3)
+    STT (Sarvam saaras:v3) → LLM (Groq LLaMA 4 Scout) → TTS (Sarvam bulbul:v3)
+
+    Reads 'current_frame_path' from shared_state (set by audio_recording_thread
+    when it picks the sharpest frame during speech). This frame is passed to the
+    LLM so it can see the person who just spoke.
 
     Args:
-        audio_path: Path to the recorded audio WAV file.
-        shared_state: Shared state dict with 'current_conversation' and 'bot_is_speaking'.
+        audio_path:   Path to the recorded audio WAV file.
+        shared_state: Shared state dict (see jarvis.py for all keys).
     """
     conversation = shared_state.get("current_conversation")
 
     if not conversation:
         print("⚠️  No conversation context set in shared_state.")
         return
+
+    # Grab and immediately clear the captured frame path so stale frames
+    # don't accidentally get reused on the next pipeline call.
+    image_path = shared_state.pop("current_frame_path", None)
 
     # Step 1: STT — Sarvam saaras:v3
     try:
@@ -36,15 +44,18 @@ def main_pipeline(audio_path, shared_state):
         return
 
     print(f"👤 User: {user_text}")
+    if image_path:
+        print(f"📸 Frame attached: {image_path}")
 
-    # Step 2: LLM — Groq LLaMA 3.3 70B
+    # Step 2: LLM — Groq LLaMA 4 Scout (vision-capable)
+    # image_path is None on text-only turns — LLM handles both gracefully.
     try:
         print("🤖 Thinking...")
-        response = conversation.send_message(user_text)
+        response = conversation.send_message(user_text, image_path=image_path)
         print(f"🤖 Bot: {response}")
     except Exception as e:
         print(f"❌ LLM Error: {e}")
         return
 
-    # Step 3: TTS — Sarvam bulbul:v3 (streaming)
+    # Step 3: TTS — Sarvam bulbul:v3 (WebSocket streaming → ffplay)
     speak_text(response, shared_state)

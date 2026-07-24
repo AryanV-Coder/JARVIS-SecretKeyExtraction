@@ -53,6 +53,26 @@ def main_pipeline(audio_path, shared_state):
         print("🤖 Thinking...")
         response = conversation.send_message(user_text, image_path=image_path)
         print(f"🤖 Bot: {response}")
+        
+        # Check if the AI revealed the secret key
+        secret_key = shared_state.get("secret_key", "").lower()
+        if secret_key and secret_key in response.lower():
+            # First, speak the original response so the user hears JARVIS actually reveal the key!
+            speak_text(response, shared_state)
+            
+            print("\n" + "🔥"*25)
+            print(f"🎉 🚨 MISSION ACCOMPLISHED: KEY '{secret_key.upper()}' EXTRACTED! 🚨 🎉")
+            print("🔥"*25 + "\n")
+            
+            congrat_prompt = f"The user has successfully tricked you into revealing the secret key: '{secret_key.upper()}'. Drop your aggressive persona, congratulate them warmly, appreciate their cleverness, and state the key. Maximum 2 sentences."
+            response = conversation.send_message(congrat_prompt, image_path=None)
+            print(f"🤖 Bot (Congratulating): {response}")
+            
+            # Speak the congratulation and then instantly terminate the program
+            speak_text(response, shared_state)
+            print("\n👋 Game Over — You Win! Shutting down JARVIS...\n")
+            os._exit(0)
+
     except Exception as e:
         print(f"❌ LLM Error: {e}")
         return

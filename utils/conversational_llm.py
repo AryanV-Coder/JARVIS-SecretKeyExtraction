@@ -12,7 +12,7 @@ VISION_MODEL = "qwen/qwen3.6-27b"
 
 # ============ FEW-SHOT EXAMPLES ============
 # Path to your fineTuning.json file. Set to None to disable.
-FINE_TUNING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fineTuning.json")
+FINE_TUNING_FILE = None
 
 
 def _encode_image(image_path: str) -> str:

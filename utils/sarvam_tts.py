@@ -31,7 +31,7 @@ async def _tts_stream_and_play(text, lang_code):
             model="bulbul:v3", send_completion_event=True
         ) as ws:
             await ws.configure(
-                target_language_code="hi-IN",
+                target_language_code=lang_code,
                 speaker="shubh",
                 pace=1.0,  # 1.0 is default, lower is slower
             )

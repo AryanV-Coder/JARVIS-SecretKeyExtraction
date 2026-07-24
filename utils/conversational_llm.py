@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import base64
 from groq import Groq, RateLimitError, APIStatusError
 from dotenv import load_dotenv
@@ -9,11 +10,69 @@ load_dotenv()
 # ============ MODEL ============
 VISION_MODEL = "qwen/qwen3.6-27b"
 
+# ============ FEW-SHOT EXAMPLES ============
+# Path to your fineTuning.json file. Set to None to disable.
+FINE_TUNING_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fineTuning.json")
+
 
 def _encode_image(image_path: str) -> str:
     """Read an image file and return its base64-encoded JPEG string."""
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
+
+
+def _load_few_shot_examples(filepath: str) -> list:
+    """
+    Load few-shot examples from a JSON file and convert them into
+    chat message pairs (user + assistant) ready to inject into history.
+
+    Expected JSON format:
+    [
+      {
+        "base64_image": "<raw base64 string, NO data:image prefix>",
+        "user_text":    "<what the user said — can be empty>",
+        "assistant_response": "<how JARVIS should respond>"
+      },
+      ...
+    ]
+
+    Returns a flat list of {role, content} dicts.
+    """
+    if not filepath or not os.path.exists(filepath):
+        return []
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            examples = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"⚠️  fineTuning.json load error: {e}")
+        return []
+
+    # --- FEW-SHOT LIMIT ---
+    # Groq has strict limits on the number of images per request (usually 3 max).
+    # We take the top 2 examples here + 1 live camera frame = 3 images total.
+    # To load ALL examples in the file instead, just comment out the line below:
+    examples = examples[:2]
+
+    messages = []
+    for i, ex in enumerate(examples):
+        b64    = ex.get("base64_image", "").strip()
+        text   = ex.get("user_text", "").strip()
+        answer = ex.get("assistant_response", "").strip()
+
+        if not b64 or not answer:
+            print(f"⚠️  fineTuning example #{i+1} missing image or response — skipped.")
+            continue
+
+        # Build user message: text first (may be empty), then image
+        user_content = [
+            {"type": "text", "text": text or "[image]"},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+        ]
+        messages.append({"role": "user",      "content": user_content})
+        messages.append({"role": "assistant",  "content": answer})
+
+    return messages
 
 
 class ConversationalLLM:
@@ -32,15 +91,27 @@ class ConversationalLLM:
     are sent as plain strings, keeping token costs low.
     """
 
-    def __init__(self, system_prompt: str):
+    def __init__(self, system_prompt: str, fine_tuning_file: str = FINE_TUNING_FILE):
         """
         Args:
-            system_prompt: System-level instruction for the assistant's persona.
+            system_prompt:    System-level instruction for the assistant's persona.
+            fine_tuning_file: Path to fineTuning.json. Pass None to skip.
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.chat_history = [
             {"role": "system", "content": system_prompt}
         ]
+
+        # ── Inject few-shot examples ──────────────────────────────────────
+        # These are loaded once at startup and placed right after the system
+        # prompt. The model treats them as prior conversation turns, learning
+        # the desired response style from the image+text→response pairs.
+        few_shot = _load_few_shot_examples(fine_tuning_file)
+        if few_shot:
+            self.chat_history.extend(few_shot)
+            print(f"📚 Loaded {len(few_shot) // 2} few-shot example(s) from {os.path.basename(fine_tuning_file)}")
+        else:
+            print("📚 No few-shot examples loaded (file missing or empty).")
 
     def send_message(self, user_text: str, image_path: str = None) -> str:
         """

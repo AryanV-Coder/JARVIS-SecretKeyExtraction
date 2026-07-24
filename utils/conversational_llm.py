@@ -48,67 +48,68 @@ class ConversationalLLM:
 
         Args:
             user_text:   The user's transcribed speech.
-            image_path:  Optional path to a JPEG frame of the user captured
-                         during their speech. When provided, sent to LLaMA 4 Scout
-                         as a base64 image_url block.
+            image_path:  Optional path to a JPEG frame captured during speech.
+                         The image is sent ONLY for this turn and is NEVER stored
+                         in chat_history — this prevents token explosion and the
+                         'too many images' 400 error on subsequent turns.
 
         Returns:
             The assistant's response string.
         """
 
-        # ── Build user content ──────────────────────────────────────────────
-        # Order follows official Groq vision docs: text block first, image_url second.
+        # ── Build the current user message (may include image) ──────────────
+        # Order follows official Groq vision docs: text first, image_url second.
         # https://console.groq.com/docs/vision
         if image_path and os.path.exists(image_path):
             b64 = _encode_image(image_path)
-            user_content = [
-                {
-                    "type": "text",
-                    "text": user_text,
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{b64}",
-                    },
-                },
-            ]
+            current_user_message = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                ],
+            }
             print(f"📸 Vision: sending frame → {image_path}")
         else:
-            # Text-only turn — no image available or not provided
-            user_content = user_text
+            current_user_message = {"role": "user", "content": user_text}
             if image_path:
-                print(f"⚠️  Vision: frame path given but file not found ({image_path}), sending text only")
+                print(f"⚠️  Vision: frame not found ({image_path}), sending text only")
 
-        self.chat_history.append({"role": "user", "content": user_content})
+        # ── Build messages for the API call ─────────────────────────────────
+        # IMPORTANT: We do NOT append to self.chat_history yet.
+        # The image travels only in this single API call.
+        # After the call we store only the plain text — this keeps the history
+        # lean and avoids: 413 token overflow, 400 "too many images" errors.
+        messages_for_api = self.chat_history + [current_user_message]
 
         # ── LLM call ────────────────────────────────────────────────────────
         try:
             response = self.client.chat.completions.create(
                 model=VISION_MODEL,
-                messages=self.chat_history,
+                messages=messages_for_api,
                 temperature=0.7,
-                max_completion_tokens=4096,  # Qwen reasoning uses tokens before the real answer
+                max_completion_tokens=1024,
                 top_p=1,
                 stream=False,
                 stop=None,
+                reasoning_effort="none",  # Groq's official param to disable Qwen thinking
             )
 
             raw = response.choices[0].message.content or ""
 
             # ── Strip Qwen reasoning blocks ──────────────────────────────────
-            # Qwen 3.6 is a reasoning model: it wraps its chain-of-thought in
-            # <think>...</think> before the actual answer. We must strip this
-            # before logging or passing to TTS, otherwise TTS gets thousands
-            # of tokens of internal monologue and returns 0 audio chunks.
-            answer = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+            # /no_think per-turn suppresses thinking, but strip as safety net.
+            # Also handles unclosed <think> tags (model cut off mid-thought).
+            answer = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+            answer = re.sub(r'<think>.*',          '',    answer, flags=re.DOTALL).strip()
 
             if not answer:
                 # Fallback: if stripping removed everything, something is wrong
                 print("⚠️  LLM returned only a think block with no final answer.")
                 answer = "Sorry, I got a bit lost in thought there. Could you repeat that?"
 
-            # Store clean answer in history (no think block, no image in assistant turn)
+            # ── Persist to history (text only, no image) ─────────────────────
+            self.chat_history.append({"role": "user", "content": user_text})
             self.chat_history.append({"role": "assistant", "content": answer})
             return answer
 

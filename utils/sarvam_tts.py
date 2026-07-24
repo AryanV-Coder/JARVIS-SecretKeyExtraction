@@ -11,7 +11,7 @@ from sarvamai.core.api_error import ApiError
 load_dotenv()
 
 
-async def _tts_stream_and_play(text):
+async def _tts_stream_and_play(text, lang_code):
     """
     Convert text to speech using Sarvam bulbul:v3 and stream directly into ffplay.
     Audio playback starts within ~0.4s of the first chunk arriving.
@@ -33,6 +33,7 @@ async def _tts_stream_and_play(text):
             await ws.configure(
                 target_language_code="hi-IN",
                 speaker="shubh",
+                pace=1.0,  # 1.0 is default, lower is slower
             )
             print("🔊 TTS: Configuration sent")
 
@@ -83,7 +84,7 @@ async def _tts_stream_and_play(text):
         print("✅ Audio playback complete")
 
 
-def speak_text(text, shared_state):
+def speak_text(text, shared_state, lang_code="hi-IN"):
     """
     Convert text to speech and play it via streaming.
     Mutes the microphone (via shared_state flag) during playback.
@@ -94,8 +95,8 @@ def speak_text(text, shared_state):
     """
     shared_state["bot_is_speaking"] = True
     try:
-        print(f"🔊 Speaking: \"{text}\"")
-        asyncio.run(_tts_stream_and_play(text))
+        print(f"🔊 Speaking: \"{text}\" [Lang: {lang_code}]")
+        asyncio.run(_tts_stream_and_play(text, lang_code))
     except Exception as e:
         print(f"❌ TTS Error: {e}")
     finally:

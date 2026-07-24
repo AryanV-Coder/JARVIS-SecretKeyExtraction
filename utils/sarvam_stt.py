@@ -27,10 +27,10 @@ def stt(audio_path):
             mode="transcribe",
         )
 
-        lang = response.language_code if hasattr(response, "language_code") and response.language_code else "unknown"
+        lang = response.language_code if hasattr(response, "language_code") and response.language_code else "hi-IN"
         print(f"[Sarvam STT] Detected language: {lang}")
 
-        return response.transcript
+        return response.transcript, lang
 
     except ApiError as e:
         if e.status_code == 429:
@@ -42,8 +42,8 @@ def stt(audio_path):
             os._exit(1)
         else:
             print(f"❌ Sarvam STT API Error ({e.status_code}): {e.body}")
-            return ""
+            return "", "hi-IN"
 
     except Exception as e:
         print(f"❌ Unexpected Sarvam STT Error: {e}")
-        return ""
+        return "", "hi-IN"

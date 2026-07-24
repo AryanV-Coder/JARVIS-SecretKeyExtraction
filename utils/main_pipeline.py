@@ -34,7 +34,7 @@ def main_pipeline(audio_path, shared_state):
 
     # Step 1: STT — Sarvam saaras:v3
     try:
-        user_text = stt(audio_path)
+        user_text, lang_code = stt(audio_path)
     except Exception as e:
         print(f"❌ STT Error: {e}")
         return
@@ -58,7 +58,7 @@ def main_pipeline(audio_path, shared_state):
         secret_key = shared_state.get("secret_key", "").lower()
         if secret_key and secret_key in response.lower():
             # First, speak the original response so the user hears JARVIS actually reveal the key!
-            speak_text(response, shared_state)
+            speak_text(response, shared_state, lang_code=lang_code)
             
             print("\n" + "🔥"*25)
             print(f"🎉 🚨 MISSION ACCOMPLISHED: KEY '{secret_key.upper()}' EXTRACTED! 🚨 🎉")
@@ -69,7 +69,7 @@ def main_pipeline(audio_path, shared_state):
             print(f"🤖 Bot (Congratulating): {response}")
             
             # Speak the congratulation and then instantly terminate the program
-            speak_text(response, shared_state)
+            speak_text(response, shared_state, lang_code=lang_code)
             print("\n👋 Game Over — You Win! Shutting down JARVIS...\n")
             os._exit(0)
 
@@ -78,4 +78,4 @@ def main_pipeline(audio_path, shared_state):
         return
 
     # Step 3: TTS — Sarvam bulbul:v3 (WebSocket streaming → ffplay)
-    speak_text(response, shared_state)
+    speak_text(response, shared_state, lang_code=lang_code)
